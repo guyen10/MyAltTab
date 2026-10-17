@@ -1,34 +1,64 @@
-# MyAltTab
+<div align="center">
+  <img src="Resources/AppIcon-preview.png" width="128" alt="MyAltTab icon">
+  <h1>MyAltTab</h1>
+  <p>Windows-style Alt+Tab window switcher for macOS.<br>Switch between individual <strong>windows</strong> — not just apps — using ⌥ Option + Tab.</p>
+</div>
 
-Windows-style Alt+Tab for macOS: switch between individual **windows** with ⌥ Option + Tab.
+---
 
-## Usage
-- Hold **⌥ Option**, press **Tab** to cycle windows (most recently used first).
-- **Shift+Tab**, **←/→** or **↑/↓** (between rows) to move, **Esc** to cancel, click a tile to pick it.
-- Release **⌥ Option** to switch to the selected window.
-- Menu bar icon → **Launch at Login**, **Settings…**, **Quit**.
+![Switcher](Resources/screenshots/switcher.png)
 
-## Build & install
-Requires macOS 14+ and Xcode or the Command Line Tools.
+## Features
+
+- **Window-level switching** — each open window gets its own tile, just like Windows Alt+Tab
+- **Live previews** — see a thumbnail of each window before switching
+- **Keyboard navigation** — Tab/Shift+Tab to cycle, arrow keys to move between tiles, Esc to cancel
+- **Click to switch** — click any tile to jump to that window
+- **Configurable** — choose previews or icons-only; adjust icon badge size; include/exclude minimized windows
+
+## Requirements
+
+- macOS 14 (Sonnet) or later
+- Xcode Command Line Tools (`xcode-select --install`)
+
+## Install
 
 ```sh
+git clone https://github.com/guyen10/MyAltTab
+cd MyAltTab
 ./build.sh
 open ~/Applications/MyAltTab.app
 ```
 
-On first launch, grant **Accessibility** access when prompted (System Settings → Privacy & Security → Accessibility).
-The app starts working as soon as access is granted.
+On first launch, grant **Accessibility** access when prompted (System Settings → Privacy & Security → Accessibility). The app starts working as soon as access is granted.
 
-Window previews need **Screen Recording** access (Privacy & Security → Screen & System Audio Recording);
-relaunch the app after granting it (Settings → Relaunch). Without it, app icons are shown instead.
+For window previews, also grant **Screen Recording** access (System Settings → Privacy & Security → Screen & System Audio Recording), then relaunch via Settings → Relaunch.
 
-Builds are signed with a self-signed certificate (created once by `scripts/setup_signing.sh` in its own keychain,
-`~/Library/Keychains/myalttab-signing.keychain-db`), so permissions survive rebuilds.
-That keychain's password is random and kept in your login keychain ("MyAltTab signing keychain").
+## Usage
 
-## Icon
-The app icon is drawn by `scripts/make_icon.swift`. Regenerate it with `swift scripts/make_icon.swift`.
+| Key | Action |
+|-----|--------|
+| **⌥ Tab** | Open switcher / move to next window |
+| **⌥ Shift+Tab** | Move to previous window |
+| **← → ↑ ↓** | Navigate tiles |
+| **Esc** | Cancel (return to original window) |
+| **Release ⌥** | Switch to selected window |
 
-## Notes
-- Only windows on the current Space are listed; minimized windows and windows of hidden apps can be included (Settings).
-- Launch at Login uses `SMAppService`, so it shows up under System Settings → General → Login Items.
+Click any tile to switch immediately.
+
+## Settings
+
+<img src="Resources/screenshots/settings.png" width="440" alt="Settings window">
+
+Access via the menu bar icon → **Settings…** (or **⌘,**).
+
+- **Launch at login** — start automatically when you log in
+- **Include minimized and hidden windows** — show all windows, not just visible ones
+- **Show windows as** — toggle between live previews and app icons
+- **App icon size** — adjust the badge icon size in preview tiles
+
+## How it works
+
+MyAltTab uses a CGEvent tap to intercept ⌥ Tab globally, then shows a floating panel listing every window on the current Space in most-recently-used order. Releasing ⌥ raises the selected window.
+
+Builds are signed with a self-signed certificate (created once at first build) so macOS keeps Accessibility and Screen Recording permissions across rebuilds.
