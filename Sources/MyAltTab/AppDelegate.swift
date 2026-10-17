@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var loginMenuItem: NSMenuItem!
     private var settingsWindow: NSWindow?
@@ -11,7 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var permissionTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        UserDefaults.standard.register(defaults: [Settings.includeMinimized: true, Settings.showPreviews: true])
+        UserDefaults.standard.register(defaults: [Settings.includeMinimized: true, Settings.showPreviews: true,
+                                                  Settings.previewIconSize: SwitcherLayout.badgeRange.upperBound])
         setUpStatusItem()
 
         monitor = HotkeyMonitor { [weak self] event in self?.handle(event) }
@@ -29,7 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handle(_ event: HotkeyMonitor.Event) {
         switch event {
-        case .start(let reverse): switcher.start(reverse: reverse)
+        case .start(let reverse):
+            // Nothing to switch to: stop swallowing keys right away.
+            if !switcher.start(reverse: reverse) { monitor.endSession() }
         case .next: switcher.move(by: 1)
         case .previous: switcher.move(by: -1)
         case .up: switcher.moveRow(by: -1)
@@ -73,12 +76,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        loginMenuItem.state = LoginItem.isEnabled ? .on : .off
+        switch LoginItem.status {
+        case .enabled: loginMenuItem.state = .on
+        case .requiresApproval: loginMenuItem.state = .mixed // registered, waiting for approval in System Settings
+        default: loginMenuItem.state = .off
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {
         do {
-            try LoginItem.setEnabled(!LoginItem.isEnabled)
+            try LoginItem.setEnabled(!LoginItem.isRegistered)
         } catch {
             NSApp.activate(ignoringOtherApps: true)
             NSAlert(error: error).runModal()
@@ -92,9 +99,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.styleMask = [.titled, .closable]
             window.isReleasedWhenClosed = false
             window.center()
+            window.delegate = self
             settingsWindow = window
         }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Drop the window so its SwiftUI view (and refresh timer) is torn down while closed.
+    func windowWillClose(_ notification: Notification) {
+        if (notification.object as? NSWindow) === settingsWindow { settingsWindow = nil }
     }
 }

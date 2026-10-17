@@ -30,6 +30,10 @@ cd MyAltTab
 open ~/Applications/MyAltTab.app
 ```
 
+`build.sh` asks for access to the signing keychain's password in your login keychain on every build. Click **Allow**, not **Always Allow**, so other programs can't sign code as MyAltTab and inherit its permissions.
+
+To install on another Mac, copy `build/MyAltTab.zip`, unzip it and move `MyAltTab.app` to `/Applications` **before** opening it. Apps opened from Downloads run from a randomized temporary location, which breaks Launch at Login and Relaunch. The app is self-signed and not notarized, so open it the first time with right-click → **Open**.
+
 On first launch, grant **Accessibility** access when prompted (System Settings → Privacy & Security → Accessibility). The app starts working as soon as access is granted.
 
 For window previews, also grant **Screen Recording** access (System Settings → Privacy & Security → Screen & System Audio Recording), then relaunch via Settings → Relaunch.

@@ -6,18 +6,19 @@ import SwiftUI
 enum Settings {
     static let includeMinimized = "includeMinimized"
     static let showPreviews = "showPreviews"
+    static let previewIconSize = "previewIconSize"
 }
 
 // Plain ObservableObject instead of @State: the Command Line Tools SDK lacks the SwiftUI macro plugin @State needs.
 final class SettingsModel: ObservableObject {
-    @Published var launchAtLogin = LoginItem.isEnabled
+    @Published var launchAtLogin = LoginItem.isRegistered
     @Published var loginStatus = LoginItem.status
     @Published var loginError: String?
     @Published var isTrusted = AXIsProcessTrusted()
     @Published var canCaptureScreen = CGPreflightScreenCaptureAccess()
 
     func setLaunchAtLogin(_ enabled: Bool) {
-        guard enabled != LoginItem.isEnabled else { return }
+        guard enabled != LoginItem.isRegistered else { return }
         do {
             try LoginItem.setEnabled(enabled)
             loginError = nil
@@ -31,7 +32,7 @@ final class SettingsModel: ObservableObject {
         isTrusted = AXIsProcessTrusted()
         canCaptureScreen = CGPreflightScreenCaptureAccess()
         loginStatus = LoginItem.status
-        let enabled = LoginItem.isEnabled || loginStatus == .requiresApproval
+        let enabled = LoginItem.isRegistered
         if launchAtLogin != enabled { launchAtLogin = enabled }
     }
 }
@@ -39,12 +40,28 @@ final class SettingsModel: ObservableObject {
 struct SettingsView: View {
     @AppStorage(Settings.includeMinimized) private var includeMinimized = true
     @AppStorage(Settings.showPreviews) private var showPreviews = true
+    @AppStorage(Settings.previewIconSize) private var previewIconSize = SwitcherLayout.badgeRange.upperBound
     @ObservedObject var model: SettingsModel
 
     private let refresh = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
+            Section {
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 64, height: 64)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("MyAltTab").font(.title2.weight(.semibold))
+                        Text("Version \(Self.version)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
             Section("General") {
                 Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin },
                                                         set: { model.setLaunchAtLogin($0) }))
@@ -65,6 +82,17 @@ struct SettingsView: View {
                     Text("Icons only").tag(false)
                 }
                 .pickerStyle(.segmented)
+                if showPreviews {
+                    LabeledContent("App icon size") {
+                        HStack {
+                            Slider(value: $previewIconSize, in: SwitcherLayout.badgeRange, step: 4)
+                            Text("\(Int(previewIconSize)) pt")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                                .frame(width: 48, alignment: .trailing)
+                        }
+                    }
+                }
             }
 
             Section("Permissions") {
@@ -106,6 +134,10 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .onAppear { model.refresh() }
         .onReceive(refresh) { _ in model.refresh() }
+    }
+
+    private static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
     }
 
     /// Screen Recording access only takes effect after the app restarts.

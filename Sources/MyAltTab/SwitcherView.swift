@@ -7,18 +7,30 @@ struct SwitcherLayout {
     static let footerHeight: CGFloat = 30 // selected-window caption + spacing
     private static let minScale: CGFloat = 0.35
 
+    static let badgeRange: ClosedRange<Double> = 24...108
+
     let showPreviews: Bool
+    /// Unscaled size of the app icon pinned to each preview (Settings → Preview icon size).
+    var badgeBase: CGFloat = CGFloat(badgeRange.upperBound)
     var columns = 1
     var rows = 1
     var scale: CGFloat = 1
 
+    /// A quarter of the preview icon sticks out past the preview's top-right corner; tiles reserve room for it.
+    private var baseOverhang: CGFloat { showPreviews ? badgeBase / 4 : 0 }
+
     // Unscaled tile metrics for each mode.
-    var baseTileSize: CGSize { showPreviews ? CGSize(width: 240, height: 176) : CGSize(width: 128, height: 114) }
+    var baseTileSize: CGSize {
+        showPreviews
+            ? CGSize(width: 240 + 2 * baseOverhang, height: 176 + baseOverhang)
+            : CGSize(width: 128, height: 114)
+    }
 
     var tileSize: CGSize { CGSize(width: baseTileSize.width * scale, height: baseTileSize.height * scale) }
     var previewSize: CGSize { CGSize(width: 212 * scale, height: 132 * scale) }
     var iconSize: CGFloat { (showPreviews ? 80 : 64) * scale }
-    var badgeSize: CGFloat { 36 * scale }
+    var badgeSize: CGFloat { badgeBase * scale }
+    var overhang: CGFloat { baseOverhang * scale }
     var fontSize: CGFloat { max(9, (showPreviews ? 12 : 11) * scale) }
 
     var gridWidth: CGFloat { CGFloat(columns) * tileSize.width }
@@ -29,15 +41,15 @@ struct SwitcherLayout {
     }
 
     /// Picks the column count that allows the largest tiles within ~90% of the screen.
-    static func fitting(count: Int, in screen: CGSize, showPreviews: Bool) -> SwitcherLayout {
+    static func fitting(count: Int, in screen: CGSize, showPreviews: Bool, badgeSize: CGFloat) -> SwitcherLayout {
         let count = max(1, count)
         let availableWidth = screen.width * 0.92 - 2 * padding
         let availableHeight = screen.height * 0.88 - 2 * padding - footerHeight
-        var best = SwitcherLayout(showPreviews: showPreviews, columns: count, rows: 1, scale: 0)
+        var best = SwitcherLayout(showPreviews: showPreviews, badgeBase: badgeSize, columns: count, rows: 1, scale: 0)
 
         for columns in 1...count {
             let rows = (count + columns - 1) / columns
-            var candidate = SwitcherLayout(showPreviews: showPreviews, columns: columns, rows: rows)
+            var candidate = SwitcherLayout(showPreviews: showPreviews, badgeBase: badgeSize, columns: columns, rows: rows)
             let base = candidate.baseTileSize
             let tilesHeight = availableHeight - CGFloat(rows - 1) * rowSpacing
             candidate.scale = min(1, availableWidth / (CGFloat(columns) * base.width), tilesHeight / (CGFloat(rows) * base.height))
@@ -102,6 +114,8 @@ struct SwitcherView: View {
                     title(for: window, lines: 1)
                         .frame(width: layout.previewSize.width, height: 16 * scale)
                 }
+                .padding(.horizontal, layout.overhang)
+                .padding(.top, layout.overhang)
             } else {
                 VStack(spacing: 6 * scale) {
                     Image(nsImage: window.icon)
@@ -145,11 +159,16 @@ struct SwitcherView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6 * layout.scale, style: .continuous))
                 .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
                 .overlay(alignment: .topTrailing) {
-                    Image(nsImage: window.icon)
-                        .resizable()
-                        .frame(width: layout.badgeSize, height: layout.badgeSize)
-                        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
-                        .offset(x: layout.badgeSize * 0.28, y: -layout.badgeSize * 0.28)
+                    GeometryReader { geometry in
+                        // Capped so the icon never outgrows short (very wide) previews.
+                        let size = min(layout.badgeSize, geometry.size.height * 0.8)
+                        Image(nsImage: window.icon)
+                            .resizable()
+                            .frame(width: size, height: size)
+                            .shadow(color: .black.opacity(0.35), radius: 3, y: 1)
+                            .offset(x: size / 4, y: -size / 4)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    }
                 }
         } else {
             Image(nsImage: window.icon)

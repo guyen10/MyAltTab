@@ -3,6 +3,9 @@ import Foundation
 
 /// Watches the keyboard through a CGEventTap and turns Option+Tab presses into switcher events.
 /// While a switch session is active, all key presses are swallowed so they don't reach the frontmost app.
+///
+/// The tap runs on its own thread and only posts events to the main queue, so slow work there
+/// (e.g. querying unresponsive apps) never stalls keyboard input system-wide.
 final class HotkeyMonitor {
     enum Event {
         case start(reverse: Bool)
@@ -26,7 +29,12 @@ final class HotkeyMonitor {
 
     private let handler: (Event) -> Void
     private var tap: CFMachPort?
-    private(set) var isActive = false
+    private var runLoop: CFRunLoop?
+
+    // Only touched on the tap thread.
+    private var isActive = false
+    /// Keys whose keyDown was swallowed; their keyUp is swallowed too so apps never see a lone release.
+    private var swallowedKeys: Set<Int64> = []
 
     init(handler: @escaping (Event) -> Void) {
         self.handler = handler
@@ -35,7 +43,7 @@ final class HotkeyMonitor {
     @discardableResult
     func start() -> Bool {
         guard tap == nil else { return true }
-        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
         let callback: CGEventTapCallBack = { _, type, event, refcon in
             let monitor = Unmanaged<HotkeyMonitor>.fromOpaque(refcon!).takeUnretainedValue()
             return monitor.handle(type: type, event: event)
@@ -48,22 +56,46 @@ final class HotkeyMonitor {
                                           userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
             return false
         }
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
         self.tap = tap
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        let ready = DispatchSemaphore(value: 0)
+        let thread = Thread { [self] in
+            runLoop = CFRunLoopGetCurrent()
+            CFRunLoopAddSource(runLoop, source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            ready.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "MyAltTab.HotkeyMonitor"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        ready.wait()
         return true
     }
 
-    /// Ends the current session without emitting an event (e.g. after a mouse click picked a window).
+    /// Ends the current session without emitting an event (e.g. after a mouse click picked a window,
+    /// or when there was nothing to switch to).
     func endSession() {
-        isActive = false
+        guard let runLoop else { return }
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) { [self] in isActive = false }
+        CFRunLoopWakeUp(runLoop)
+    }
+
+    private func emit(_ event: Event) {
+        DispatchQueue.main.async { [handler] in handler(event) }
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         let passThrough = Unmanaged.passUnretained(event)
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            // Events (possibly the Option release) were missed while disabled, so don't trust the session state.
+            if isActive {
+                isActive = false
+                emit(.cancel)
+            }
+            swallowedKeys.removeAll()
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return passThrough
         }
@@ -74,22 +106,35 @@ final class HotkeyMonitor {
         if type == .flagsChanged {
             if isActive && !option {
                 isActive = false
-                handler(.commit)
+                emit(.commit)
             }
             return passThrough
         }
 
-        guard type == .keyDown else { return passThrough }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        if type == .keyUp {
+            return swallowedKeys.remove(keyCode) != nil ? nil : passThrough
+        }
+        guard type == .keyDown else { return passThrough }
+
+        // The Option release was missed (e.g. Secure Input was on): end the session and let typing through.
+        if isActive && !option {
+            isActive = false
+            emit(.cancel)
+            return passThrough
+        }
+
         let shift = flags.contains(.maskShift)
 
         if keyCode == KeyCode.tab && option && !flags.contains(.maskCommand) && !flags.contains(.maskControl) {
             if isActive {
-                handler(shift ? .previous : .next)
+                emit(shift ? .previous : .next)
             } else {
                 isActive = true
-                handler(.start(reverse: shift))
+                emit(.start(reverse: shift))
             }
+            swallowedKeys.insert(keyCode)
             return nil
         }
 
@@ -97,21 +142,22 @@ final class HotkeyMonitor {
         switch keyCode {
         case KeyCode.escape:
             isActive = false
-            handler(.cancel)
+            emit(.cancel)
         case KeyCode.returnKey:
             isActive = false
-            handler(.commit)
+            emit(.commit)
         case KeyCode.left:
-            handler(.previous)
+            emit(.previous)
         case KeyCode.right:
-            handler(.next)
+            emit(.next)
         case KeyCode.up:
-            handler(.up)
+            emit(.up)
         case KeyCode.down:
-            handler(.down)
+            emit(.down)
         default:
             break
         }
+        swallowedKeys.insert(keyCode)
         return nil
     }
 }

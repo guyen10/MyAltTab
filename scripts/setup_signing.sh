@@ -4,6 +4,8 @@
 # so macOS keeps its Accessibility and Screen Recording permissions across rebuilds.
 #
 # The signing keychain's password is random and stored in the login keychain, never in this repo.
+# No app is pre-approved to read it, so macOS asks before every build; that keeps other
+# processes from silently unlocking the key and re-signing a binary as MyAltTab.
 set -euo pipefail
 
 KEYCHAIN="$HOME/Library/Keychains/myalttab-signing.keychain-db"
@@ -51,12 +53,12 @@ CONF
         -name "$IDENTITY" -out "$tmp/identity.p12" -passout env:P12_PASSWORD
 
     security create-keychain -p "$password" "$KEYCHAIN"
-    security set-keychain-settings "$KEYCHAIN" # never auto-lock
+    security set-keychain-settings -l -t 300 "$KEYCHAIN" # lock on sleep and after 5 minutes
     security unlock-keychain -p "$password" "$KEYCHAIN"
     security import "$tmp/identity.p12" -k "$KEYCHAIN" -P "$password" -T /usr/bin/codesign >/dev/null
     security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$KEYCHAIN" >/dev/null
     security add-generic-password -U -a "$USER" -s "$PASSWORD_SERVICE" -w "$password" \
-        -T /usr/bin/security "$HOME/Library/Keychains/login.keychain-db"
+        -T "" "$HOME/Library/Keychains/login.keychain-db"
     echo "Created signing identity \"$IDENTITY\" in $KEYCHAIN"
 }
 
@@ -70,4 +72,5 @@ if ! password="$(stored_password)"; then
     exit 1
 fi
 add_to_search_list
+security set-keychain-settings -l -t 300 "$KEYCHAIN" # also tightens keychains created by older versions
 security unlock-keychain -p "$password" "$KEYCHAIN"

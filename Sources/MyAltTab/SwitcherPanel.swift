@@ -17,6 +17,8 @@ final class SwitcherController {
     private let panel: NSPanel
     private let hostingView: NSHostingView<SwitcherView>
     private var pendingShow: DispatchWorkItem?
+    /// The screen the layout was sized for; the panel is shown on the same one.
+    private var screen: NSScreen?
 
     init() {
         panel = NSPanel(contentRect: .zero,
@@ -35,15 +37,22 @@ final class SwitcherController {
         hostingView.rootView = SwitcherView(model: model, onClick: { [weak self] index in self?.onClick?(index) })
     }
 
-    func start(reverse: Bool) {
+    /// Returns false when there are no windows to switch to.
+    @discardableResult
+    func start(reverse: Bool) -> Bool {
         let includeMinimized = UserDefaults.standard.bool(forKey: Settings.includeMinimized)
         let windows = WindowManager.windows(includeMinimized: includeMinimized)
         model.windows = windows
-        guard !windows.isEmpty else { return }
+        PreviewCapture.shared.prune(keeping: Set(windows.map(\.windowID)))
+        guard !windows.isEmpty else { return false }
 
+        let screen = activeScreen()
+        self.screen = screen
         let showPreviews = UserDefaults.standard.bool(forKey: Settings.showPreviews)
-        model.layout = SwitcherLayout.fitting(count: windows.count, in: activeScreen().visibleFrame.size,
-                                              showPreviews: showPreviews)
+        let badgeRange = SwitcherLayout.badgeRange
+        let badgeSize = min(max(UserDefaults.standard.double(forKey: Settings.previewIconSize), badgeRange.lowerBound), badgeRange.upperBound)
+        model.layout = SwitcherLayout.fitting(count: windows.count, in: screen.visibleFrame.size,
+                                              showPreviews: showPreviews, badgeSize: CGFloat(badgeSize))
 
         if showPreviews {
             // Show cached thumbnails right away, then fill in fresh ones as they arrive.
@@ -64,6 +73,7 @@ final class SwitcherController {
         let work = DispatchWorkItem { [weak self] in self?.showPanel() }
         pendingShow = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+        return true
     }
 
     func move(by delta: Int) {
@@ -116,7 +126,7 @@ final class SwitcherController {
     }
 
     private func showPanel() {
-        let frame = activeScreen().visibleFrame
+        let frame = (screen ?? activeScreen()).visibleFrame
         // Size comes from the layout math rather than SwiftUI's fittingSize, which can lag behind model changes.
         let size = model.layout.panelSize
         panel.setFrame(NSRect(x: frame.midX - size.width / 2,

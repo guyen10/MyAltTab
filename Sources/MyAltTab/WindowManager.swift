@@ -39,6 +39,7 @@ enum WindowManager {
             guard let axWindows: [AXUIElement] = attribute(axApp, kAXWindowsAttribute) else { continue }
 
             for element in axWindows {
+                AXUIElementSetMessagingTimeout(element, 0.25) // elements don't inherit the app's timeout
                 guard (attribute(element, kAXSubroleAttribute) as String?) == kAXStandardWindowSubrole else { continue }
                 let minimized = (attribute(element, kAXMinimizedAttribute) as Bool?) ?? false
 
@@ -77,6 +78,7 @@ enum WindowManager {
 
         // Making the app frontmost through AX works even when macOS' cooperative activation would refuse.
         let axApp = AXUIElementCreateApplication(window.app.processIdentifier)
+        AXUIElementSetMessagingTimeout(axApp, 0.25)
         AXUIElementSetAttributeValue(axApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
         window.app.activate(options: [])
         AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)

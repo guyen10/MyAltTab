@@ -29,13 +29,12 @@ final class PreviewCapture {
                     }
                 }
             }
-
-            // Forget windows that no longer exist.
-            let alive = Set(windows.keys)
-            await MainActor.run {
-                self.cache = self.cache.filter { alive.contains($0.key) || !windowIDs.contains($0.key) }
-            }
         }
+    }
+
+    /// Forgets thumbnails of windows that no longer exist, so closed windows' contents don't linger in memory.
+    func prune(keeping windowIDs: Set<CGWindowID>) {
+        cache = cache.filter { windowIDs.contains($0.key) }
     }
 
     private static func snapshot(_ window: SCWindow) async throws -> NSImage {
